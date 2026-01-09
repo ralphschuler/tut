@@ -1,0 +1,9 @@
+# Ignore build artifacts
+dist/
+*.log
+*.exe
+*.out
+
+# Go build cache
+bin/
+pkg/
