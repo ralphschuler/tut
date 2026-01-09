@@ -3,6 +3,7 @@ dist/
 *.log
 *.exe
 *.out
+ssh-socat-tunnel
 
 # Go build cache
 bin/

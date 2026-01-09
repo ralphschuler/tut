@@ -252,4 +252,90 @@ func buildRemoteScript(cfg *Config) string {
     }
     // watchdog loop: if any child dies, exit to force reconnect
     b.WriteString(`while true; do `)
-    b.WriteStrin
+    b.WriteString(`for p in $pids; do if ! kill -0 "$p" 2>/dev/null; then echo "Child process $p died; exiting to reconnect" >&2; exit 1; fi; done; `)
+    b.WriteString(`sleep 5; done`)
+    return b.String()
+}
+
+// runTunnel starts the SSH tunnel and monitors it, restarting on failure.
+func runTunnel(ctx context.Context, cfg *Config, localWrappers []*child) error {
+    sshArgs, target := buildSSHArgs(cfg)
+    script := buildRemoteScript(cfg)
+    fullArgs := append(sshArgs, target, script)
+    
+    logf("Starting SSH tunnel to %s", target)
+    cmd := exec.CommandContext(ctx, "ssh", fullArgs...)
+    cmd.Stdout = os.Stdout
+    cmd.Stderr = os.Stderr
+    
+    if err := cmd.Start(); err != nil {
+        return fmt.Errorf("failed to start SSH: %w", err)
+    }
+    
+    logf("SSH tunnel running (PID %d)", cmd.Process.Pid)
+    return cmd.Wait()
+}
+
+func main() {
+    configPath := flag.String("config", "/etc/ssh-tunnel/config.yaml", "Path to config file")
+    flag.Parse()
+    
+    requireBinary("ssh")
+    requireBinary("socat")
+    
+    cfg, err := loadConfig(*configPath)
+    if err != nil {
+        die("Failed to load config: %v", err)
+    }
+    
+    if err := validateConfig(cfg); err != nil {
+        die("Invalid config: %v", err)
+    }
+    
+    logf("Loaded config from %s", *configPath)
+    
+    // Start local UDP wrappers
+    localWrappers, err := startLocalWrappers(cfg)
+    if err != nil {
+        die("Failed to start local wrappers: %v", err)
+    }
+    defer func() {
+        for _, w := range localWrappers {
+            w.stop(2 * time.Second)
+        }
+    }()
+    
+    // Verify local wrappers are listening
+    if err := assertLocalWrappers(cfg); err != nil {
+        die("Local wrapper health check failed: %v", err)
+    }
+    
+    // Setup signal handling
+    ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+    defer cancel()
+    
+    // Main reconnect loop
+    for {
+        if ctx.Err() != nil {
+            logf("Shutting down gracefully")
+            return
+        }
+        
+        if err := runTunnel(ctx, cfg, localWrappers); err != nil {
+            if ctx.Err() != nil {
+                logf("Tunnel terminated by signal")
+                return
+            }
+            logf("Tunnel failed: %v", err)
+        }
+        
+        logf("Reconnecting in %d seconds...", cfg.ReconnectDelaySeconds)
+        select {
+        case <-time.After(time.Duration(cfg.ReconnectDelaySeconds) * time.Second):
+            // Continue to reconnect
+        case <-ctx.Done():
+            logf("Shutting down gracefully")
+            return
+        }
+    }
+}
