@@ -1,0 +1,35 @@
+# Example configuration for ssh-socat-tunnel
+# Copy this file to /etc/ssh-tunnel/config.yaml and adjust values as needed.
+
+vps:
+  host: "your.vps.hostname"    # public IP or hostname of your VPS
+  user: "root"                 # user to connect as on the VPS
+  port: 22                      # SSH port (default 22)
+  ssh_key: "/path/to/id_ed25519"  # private key path used for authentication
+  strict_hostkey: "accept-new"      # how to handle unknown host keys (see ssh_config)
+
+reconnect_delay_seconds: 2      # seconds to wait before reconnecting if the tunnel drops
+
+# TCP forwards map a public port on the VPS back to a local service.
+# Each entry is of the form:
+#   remote_port: <port on VPS>
+#   local_host:  <host running the service>
+#   local_port:  <port of the service>
+# Remove or add entries as required.
+tcp_forwards:
+  - remote_port: 25565
+    local_host: "192.168.1.50"
+    local_port: 25565
+
+# UDP forwards wrap UDP via an inner TCP connection.
+# Each entry defines:
+#   udp_public_port – the UDP port on the VPS open to the internet
+#   local_host – address of the local service
+#   local_udp_port – UDP port of the local service
+#   wrap_tcp_port – an internal TCP port used on both sides of the tunnel
+# Note: wrap_tcp_port must be unique and unused on the VPS and locally.
+udp_forwards:
+  - udp_public_port: 19132
+    local_host: "192.168.1.50"
+    local_udp_port: 19132
+    wrap_tcp_port: 10000
