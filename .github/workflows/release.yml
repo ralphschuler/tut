@@ -37,7 +37,7 @@ jobs:
           GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 \
             go build -o dist/ssh-socat-tunnel-${{ matrix.goos }}-${{ matrix.goarch }} ./ssh-socat-tunnel
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ssh-socat-tunnel-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/ssh-socat-tunnel-${{ matrix.goos }}-${{ matrix.goarch }}
