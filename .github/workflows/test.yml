@@ -273,8 +273,10 @@ jobs:
             kill $(cat /tmp/udp-server.pid) 2>/dev/null || true
           fi
           
-          # Kill any remaining socat processes
-          sudo pkill -9 socat 2>/dev/null || true
+          # Kill any remaining socat processes by finding their PIDs
+          pgrep socat | while read pid; do
+            sudo kill -9 $pid 2>/dev/null || true
+          done
           
           # Clean up temp files
           sudo rm -rf /tmp/ssh-socat-tunnel-* 2>/dev/null || true
