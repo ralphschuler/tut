@@ -4,9 +4,9 @@
 
 The program reads a YAML configuration describing your VPS and a set of TCP and UDP forward definitions. It then:
 
-* Starts `socat` locally to wrap UDP listeners into TCP listeners.
+* Starts `socat` locally with FIFO (named pipes) to wrap UDP listeners into TCP listeners for stable bidirectional communication.
 * Opens an SSH connection to your VPS with reverse port forwards for both TCP and the wrapped UDP TCP ports.
-* Runs a small shell script on the VPS to start remote UDP listeners via `socat` and forward them back through the SSH tunnel.
+* Runs a small shell script on the VPS to start remote UDP listeners via `socat` with FIFO pipes and forward them back through the SSH tunnel.
 * Keeps the connection alive and automatically reconnects if the tunnel drops.
 
 The result is that services running on your local machine (even those listening on private addresses) become accessible via the public ports on your VPS.
@@ -15,6 +15,7 @@ The result is that services running on your local machine (even those listening 
 
 * Works on Linux, macOS and other platforms where `ssh` and `socat` are available.
 * Supports multiple TCP and UDP forwards simultaneously.
+* **FIFO-based UDP tunneling** for improved stability and bidirectional communication (following best practices from [this guide](https://superuser.com/questions/53103/udp-traffic-through-ssh-tunnel)).
 * Health checks to ensure local listeners are active before connecting.
 * Automatic reconnection if the SSH tunnel drops.
 

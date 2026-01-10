@@ -107,8 +107,9 @@ func validateConfig(c *Config) error {
 
 // child wraps an exec.Cmd with context for clean termination.
 type child struct {
-    cmd *exec.Cmd
-    tag string
+    cmd   *exec.Cmd
+    tag   string
+    fifos []string // FIFO paths to clean up
 }
 
 // stop sends SIGTERM to the process and waits for a grace period before killing it.
@@ -128,6 +129,10 @@ func (c *child) stop(grace time.Duration) {
     case <-time.After(grace):
         _ = c.cmd.Process.Kill()
         _ = c.cmd.Wait()
+    }
+    // Clean up FIFOs
+    for _, fifo := range c.fifos {
+        _ = os.Remove(fifo)
     }
 }
 
@@ -161,7 +166,18 @@ func requireBinary(name string) {
     }
 }
 
-// startLocalWrappers starts socat processes to wrap each UDP forward into a TCP listener.
+// createFIFO creates a named pipe (FIFO) at the specified path.
+// It removes any existing file at that path first.
+func createFIFO(path string) error {
+    _ = os.Remove(path)
+    return syscall.Mkfifo(path, 0o600)
+}
+
+// startLocalWrappers starts socat processes to wrap each UDP forward using FIFO pipes.
+// This implementation follows the stable FIFO-based approach from:
+// https://superuser.com/questions/53103/udp-traffic-through-ssh-tunnel
+// 
+// Architecture: UDP-LISTEN ↔ TCP-CONNECT via PIPE for bidirectional flow
 func startLocalWrappers(cfg *Config) ([]*child, error) {
     if len(cfg.UDPForwards) == 0 {
         logf("No udp_forwards configured; skipping local UDP wrappers.")
@@ -169,26 +185,78 @@ func startLocalWrappers(cfg *Config) ([]*child, error) {
     }
     var kids []*child
     for _, u := range cfg.UDPForwards {
-        llog := fmt.Sprintf("/var/log/socat-local-udpwrap-%d.log", u.UDPPublicPort)
-        _ = os.MkdirAll(filepath.Dir(llog), 0o755)
-        args := []string{
+        // Create FIFO directory
+        fifoDir := fmt.Sprintf("/tmp/ssh-socat-tunnel-%d", u.UDPPublicPort)
+        _ = os.MkdirAll(fifoDir, 0o755)
+        
+        fifoPath := filepath.Join(fifoDir, "pipe")
+        
+        // Create FIFO
+        if err := createFIFO(fifoPath); err != nil {
+            return nil, fmt.Errorf("failed to create FIFO %s: %w", fifoPath, err)
+        }
+        
+        llogUDP := fmt.Sprintf("/var/log/socat-local-udp-%d.log", u.UDPPublicPort)
+        llogTCP := fmt.Sprintf("/var/log/socat-local-tcp-%d.log", u.UDPPublicPort)
+        _ = os.MkdirAll(filepath.Dir(llogUDP), 0o755)
+        
+        // First socat: UDP-LISTEN → PIPE (bidirectional)
+        argsUDP := []string{
             "-T", "30",
-            fmt.Sprintf("TCP4-LISTEN:%d,bind=127.0.0.1,reuseaddr,fork", u.WrapTCPPort),
-            fmt.Sprintf("UDP:%s:%d", u.LocalHost, u.LocalUDPPort),
+            fmt.Sprintf("UDP-LISTEN:%d,bind=%s,reuseaddr,fork", u.LocalUDPPort, u.LocalHost),
+            fmt.Sprintf("PIPE:%s", fifoPath),
         }
-        cmd := exec.Command("socat", args...)
-        f, err := os.OpenFile(llog, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+        cmdUDP := exec.Command("socat", argsUDP...)
+        fUDP, err := os.OpenFile(llogUDP, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
         if err != nil {
+            _ = os.Remove(fifoPath)
             return nil, err
         }
-        cmd.Stdout = f
-        cmd.Stderr = f
-        if err := cmd.Start(); err != nil {
-            _ = f.Close()
+        cmdUDP.Stdout = fUDP
+        cmdUDP.Stderr = fUDP
+        if err := cmdUDP.Start(); err != nil {
+            _ = fUDP.Close()
+            _ = os.Remove(fifoPath)
             return nil, err
         }
-        kids = append(kids, &child{cmd: cmd, tag: fmt.Sprintf("local-socat-udpwrap-%d", u.UDPPublicPort)})
-        logf("Local wrapper pid=%d : TCP 127.0.0.1:%d <-> UDP %s:%d (VPS UDP %d) log=%s", cmd.Process.Pid, u.WrapTCPPort, u.LocalHost, u.LocalUDPPort, u.UDPPublicPort, llog)
+        
+        // Second socat: PIPE → TCP (bidirectional)
+        argsTCP := []string{
+            "-T", "30",
+            fmt.Sprintf("PIPE:%s", fifoPath),
+            fmt.Sprintf("TCP:127.0.0.1:%d", u.WrapTCPPort),
+        }
+        cmdTCP := exec.Command("socat", argsTCP...)
+        fTCP, err := os.OpenFile(llogTCP, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+        if err != nil {
+            _ = cmdUDP.Process.Kill()
+            _ = fUDP.Close()
+            _ = os.Remove(fifoPath)
+            return nil, err
+        }
+        cmdTCP.Stdout = fTCP
+        cmdTCP.Stderr = fTCP
+        if err := cmdTCP.Start(); err != nil {
+            _ = cmdUDP.Process.Kill()
+            _ = fTCP.Close()
+            _ = fUDP.Close()
+            _ = os.Remove(fifoPath)
+            return nil, err
+        }
+        
+        kids = append(kids, &child{
+            cmd:   cmdUDP,
+            tag:   fmt.Sprintf("local-socat-udp-%d", u.UDPPublicPort),
+            fifos: []string{fifoPath},
+        })
+        kids = append(kids, &child{
+            cmd:   cmdTCP,
+            tag:   fmt.Sprintf("local-socat-tcp-%d", u.UDPPublicPort),
+            fifos: nil, // FIFO cleaned by first process
+        })
+        
+        logf("Local FIFO wrapper pid=%d/%d : UDP %s:%d <-> PIPE <-> TCP 127.0.0.1:%d (VPS UDP %d)",
+            cmdUDP.Process.Pid, cmdTCP.Process.Pid, u.LocalHost, u.LocalUDPPort, u.WrapTCPPort, u.UDPPublicPort)
     }
     return kids, nil
 }
@@ -229,7 +297,8 @@ func buildSSHArgs(cfg *Config) ([]string, string) {
 }
 
 // buildRemoteScript generates a POSIX shell script to run on the remote VPS via SSH.
-// The script starts UDP listeners and forwards them to local TCP wrappers via socat.
+// The script creates FIFO pipes and starts socat processes using the stable FIFO-based approach
+// for bidirectional UDP tunneling.
 func buildRemoteScript(cfg *Config) string {
     var b strings.Builder
     b.WriteString("set -eu; ")
@@ -237,7 +306,9 @@ func buildRemoteScript(cfg *Config) string {
     b.WriteString("export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH; ")
     b.WriteString(`SOCAT_BIN="$(command -v socat || true)"; `)
     b.WriteString(`if [ -z "$SOCAT_BIN" ]; then echo "ERROR: socat not found on VPS. PATH=$PATH" >&2; exit 1; fi; `)
-    b.WriteString(`pids=""; cleanup(){ for p in $pids; do kill "$p" 2>/dev/null || true; done; }; trap cleanup INT TERM EXIT; `)
+    b.WriteString(`pids=""; fifos=""; `)
+    b.WriteString(`cleanup(){ for p in $pids; do kill "$p" 2>/dev/null || true; done; for f in $fifos; do rm -f "$f" 2>/dev/null || true; done; }; `)
+    b.WriteString(`trap cleanup INT TERM EXIT; `)
     if len(cfg.UDPForwards) == 0 {
         // Nothing to run; keep the SSH session alive
         b.WriteString("while true; do sleep 3600; done")
@@ -246,8 +317,24 @@ func buildRemoteScript(cfg *Config) string {
     for _, u := range cfg.UDPForwards {
         // best-effort kill any existing listener on the public port if fuser exists
         b.WriteString(fmt.Sprintf(`if command -v fuser >/dev/null 2>&1; then fuser -k %d/udp 2>/dev/null || true; fi; `, u.UDPPublicPort))
-        b.WriteString(fmt.Sprintf(`"$SOCAT_BIN" -T 30 UDP-LISTEN:%d,reuseaddr,fork TCP4:127.0.0.1:%d >>/var/log/socat-udpwrap-%d.log 2>&1 & `,
-            u.UDPPublicPort, u.WrapTCPPort, u.UDPPublicPort))
+        
+        // Create FIFO directory and pipe
+        fifoDir := fmt.Sprintf("/tmp/ssh-socat-tunnel-%d", u.UDPPublicPort)
+        fifoPath := fmt.Sprintf("%s/pipe", fifoDir)
+        b.WriteString(fmt.Sprintf(`mkdir -p "%s"; `, fifoDir))
+        b.WriteString(fmt.Sprintf(`rm -f "%s"; `, fifoPath))
+        b.WriteString(fmt.Sprintf(`mkfifo -m 600 "%s"; `, fifoPath))
+        b.WriteString(fmt.Sprintf(`fifos="$fifos %s"; `, fifoPath))
+        
+        // First socat: TCP-LISTEN → PIPE (receives from SSH tunnel)
+        b.WriteString(fmt.Sprintf(`"$SOCAT_BIN" -T 30 TCP-LISTEN:%d,bind=127.0.0.1,reuseaddr,fork PIPE:%s >>/var/log/socat-tcp-%d.log 2>&1 & `,
+            u.WrapTCPPort, fifoPath, u.UDPPublicPort))
+        b.WriteString(`pids="$pids $!"; `)
+        
+        // Second socat: PIPE → UDP-LISTEN (bidirectional UDP on public port)
+        // Using UDP-LISTEN instead of UDP-SENDTO for proper bidirectional communication
+        b.WriteString(fmt.Sprintf(`"$SOCAT_BIN" -T 30 PIPE:%s UDP-LISTEN:%d,bind=0.0.0.0,reuseaddr,fork >>/var/log/socat-udp-%d.log 2>&1 & `,
+            fifoPath, u.UDPPublicPort, u.UDPPublicPort))
         b.WriteString(`pids="$pids $!"; `)
     }
     // watchdog loop: if any child dies, exit to force reconnect
