@@ -250,8 +250,7 @@ func startLocalWrappers(cfg *Config) ([]*child, error) {
         cmdUDP := exec.Command("socat", argsUDP...)
         fUDP, err := os.OpenFile(llogUDP, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
         if err != nil {
-            tcpChild := &child{cmd: cmdTCP, tag: "cleanup"}
-            tcpChild.stop(1 * time.Second)
+            (&child{cmd: cmdTCP, tag: "cleanup"}).stop(1 * time.Second)
             _ = fTCP.Close()
             cleanup()
             return nil, err
@@ -259,8 +258,7 @@ func startLocalWrappers(cfg *Config) ([]*child, error) {
         cmdUDP.Stdout = fUDP
         cmdUDP.Stderr = fUDP
         if err := cmdUDP.Start(); err != nil {
-            tcpChild := &child{cmd: cmdTCP, tag: "cleanup"}
-            tcpChild.stop(1 * time.Second)
+            (&child{cmd: cmdTCP, tag: "cleanup"}).stop(1 * time.Second)
             _ = fTCP.Close()
             _ = fUDP.Close()
             cleanup()
@@ -273,9 +271,8 @@ func startLocalWrappers(cfg *Config) ([]*child, error) {
             fifos: []string{fifoPath},
         })
         kids = append(kids, &child{
-            cmd:   cmdUDP,
-            tag:   fmt.Sprintf("local-socat-udp-%d", u.UDPPublicPort),
-            fifos: nil, // FIFO cleaned by first process
+            cmd: cmdUDP,
+            tag: fmt.Sprintf("local-socat-udp-%d", u.UDPPublicPort),
         })
         
         logf("Local FIFO wrapper pid=%d/%d : TCP 127.0.0.1:%d <-> PIPE <-> UDP %s:%d (VPS UDP %d)",
@@ -335,7 +332,7 @@ func buildRemoteScript(cfg *Config) string {
     b.WriteString("export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH; ")
     b.WriteString(`SOCAT_BIN="$(command -v socat || true)"; `)
     b.WriteString(`if [ -z "$SOCAT_BIN" ]; then echo "ERROR: socat not found on VPS. PATH=$PATH" >&2; exit 1; fi; `)
-    b.WriteString(`pids=""; fifos=""; `)
+    b.WriteString(`pids=""; `)
     // Create secure temporary directory for FIFOs
     b.WriteString(`FIFO_DIR="$(mktemp -d -t ssh-socat-tunnel-XXXXXX)"; `)
     b.WriteString(`cleanup(){ for p in $pids; do kill "$p" 2>/dev/null || true; done; rm -rf "$FIFO_DIR" 2>/dev/null || true; }; `)
