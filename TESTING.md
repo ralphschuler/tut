@@ -15,8 +15,8 @@ The test workflow (`.github/workflows/test.yml`) runs automatically on:
 ### TCP Tunnel Testing
 - **Establishment**: Verifies that TCP tunnel can be created successfully
 - **Data Flow**: Tests sending data from client → tunnel → server
-- **Echo Response**: Validates bidirectional communication
-- **Stability**: Sends multiple sequential messages to ensure reliability
+- **Echo Response**: Validates echo round-trip communication
+- **Stability**: Tests with several sequential messages to check basic stability
 
 ### UDP Tunnel Testing
 - **Establishment**: Verifies that UDP tunnel can be created successfully  

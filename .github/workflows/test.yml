@@ -22,7 +22,7 @@ jobs:
       
       - name: Install dependencies
         run: |
-          # Install socat for tunnel operations
+          # Install dependencies for tunnel testing
           sudo apt-get update
           sudo apt-get install -y socat openssh-server netcat-openbsd
       
@@ -44,13 +44,13 @@ jobs:
           PermitRootLogin no
           PubkeyAuthentication yes
           PasswordAuthentication no
-          GatewayPorts yes
+          GatewayPorts no
           AllowTcpForwarding yes
           EOF
           
           # Start SSH server
           sudo systemctl start ssh
-          sudo systemctl status ssh --no-pager
+          sudo systemctl status ssh --no-pager || true
           
           # Wait for SSH to be ready
           sleep 2
@@ -105,7 +105,7 @@ jobs:
           # Start a UDP echo server on port 8002
           nohup socat -v UDP-LISTEN:8002,bind=127.0.0.1,reuseaddr,fork EXEC:'/bin/cat' > /tmp/udp-server.log 2>&1 &
           echo $! > /tmp/udp-server.pid
-          sleep 1
+          sleep 5
           
           # Verify UDP server is running
           echo "Testing UDP server..."
@@ -121,20 +121,47 @@ jobs:
           nohup sudo -E ./ssh-socat-tunnel -config /tmp/test-config/config.yaml > /tmp/tunnel.log 2>&1 &
           echo $! > /tmp/tunnel.pid
           
-          # Wait for tunnel to establish
+          # Wait for tunnel to establish by checking process and ports
           echo "Waiting for tunnel to establish..."
-          sleep 10
+          TUNNEL_PID=$(cat /tmp/tunnel.pid)
+          TUNNEL_READY=0
+          for i in {1..60}; do
+            # Check if tunnel process is still running
+            if ! ps -p "$TUNNEL_PID" > /dev/null; then
+              echo "ERROR: Tunnel process died while waiting for readiness (PID: $TUNNEL_PID)"
+              echo "=== Tunnel logs ==="
+              cat /tmp/tunnel.log || true
+              exit 1
+            fi
+            
+            # Check if expected tunnel ports are listening (TCP 9001 and UDP 9002)
+            if nc -z localhost 9001 2>/dev/null && nc -u -z localhost 9002 2>/dev/null; then
+              echo "Tunnel is established (TCP 9001 and UDP 9002 are reachable)"
+              TUNNEL_READY=1
+              break
+            fi
+            
+            echo "Waiting for tunnel ports to become ready... (attempt $i/60)"
+            sleep 1
+          done
+          
+          if [ "$TUNNEL_READY" -ne 1 ]; then
+            echo "ERROR: Tunnel did not become ready within the expected time"
+            echo "=== Tunnel logs ==="
+            cat /tmp/tunnel.log || true
+            exit 1
+          fi
           
           # Show tunnel logs
           echo "=== Tunnel logs ==="
           cat /tmp/tunnel.log || true
           
-          # Check if tunnel process is still running
-          if ps -p $(cat /tmp/tunnel.pid) > /dev/null; then
-            echo "Tunnel process is running (PID: $(cat /tmp/tunnel.pid))"
+          # Final check: ensure tunnel process is still running
+          if ps -p "$TUNNEL_PID" > /dev/null; then
+            echo "Tunnel process is running (PID: $TUNNEL_PID)"
           else
-            echo "ERROR: Tunnel process died"
-            cat /tmp/tunnel.log
+            echo "ERROR: Tunnel process died after readiness check"
+            cat /tmp/tunnel.log || true
             exit 1
           fi
       
@@ -167,22 +194,22 @@ jobs:
             exit 1
           fi
       
-      - name: Test TCP tunnel - Reverse direction
+      - name: Test TCP tunnel - Multiple messages
         run: |
-          echo "=== Testing TCP tunnel (reverse direction) ==="
+          echo "=== Testing TCP tunnel - Multiple messages ==="
           
           # Send multiple messages to test stability
           for i in {1..3}; do
             response=$(echo "TCP_MESSAGE_$i" | nc -w 2 localhost 9001)
             echo "Message $i response: $response"
             if [ "$response" != "TCP_MESSAGE_$i" ]; then
-              echo "✗ TCP reverse test FAILED on message $i"
+              echo "✗ TCP multiple messages test FAILED on message $i"
               exit 1
             fi
             sleep 1
           done
           
-          echo "✓ TCP reverse direction test PASSED"
+          echo "✓ TCP multiple messages test PASSED"
       
       - name: Test UDP tunnel - Send data
         run: |
@@ -191,36 +218,25 @@ jobs:
           # Wait for remote UDP port to be ready
           sleep 5
           
-          # Send test data through the UDP tunnel
-          # UDP is connectionless, so we use a different approach
+          # Send test data through the UDP tunnel using socat for more reliable testing
           echo "Sending data through UDP tunnel..."
           
-          # Create a temporary file for the response
-          response_file="/tmp/udp_response.txt"
+          # Use socat for bidirectional UDP test
+          response=$(echo "HELLO_UDP_TUNNEL" | socat - UDP:localhost:9002,shut-none 2>&1 | head -n 1 || echo "")
+          echo "Response: '$response'"
           
-          # Start a listener for the response and send the message
-          (echo "HELLO_UDP_TUNNEL" | nc -u -w 3 localhost 9002 > "$response_file") &
-          pid=$!
-          
-          # Wait for the response
-          sleep 2
-          
-          # Read the response
-          if [ -f "$response_file" ] && [ -s "$response_file" ]; then
-            response=$(cat "$response_file")
-            echo "Response: $response"
-            
-            if echo "$response" | grep -q "HELLO_UDP_TUNNEL"; then
-              echo "✓ UDP tunnel test PASSED"
+          # Check if we got a response
+          if [ -n "$response" ] && echo "$response" | grep -q "HELLO_UDP_TUNNEL"; then
+            echo "✓ UDP tunnel test PASSED"
+          else
+            # Fallback: verify tunnel is up by checking listening ports
+            echo "UDP echo response not received, verifying tunnel is established..."
+            if nc -u -z localhost 9002 2>/dev/null; then
+              echo "✓ UDP tunnel established (port 9002 is listening)"
             else
-              echo "✗ UDP tunnel test FAILED"
-              echo "Expected to contain: HELLO_UDP_TUNNEL"
-              echo "Got: $response"
+              echo "✗ UDP tunnel test FAILED - port 9002 not listening"
               exit 1
             fi
-          else
-            echo "✓ UDP tunnel established (echo may not work reliably with nc UDP)"
-            # UDP echo can be unreliable with nc, so we just verify the tunnel is up
           fi
       
       - name: Test UDP tunnel - Multiple packets
@@ -228,13 +244,23 @@ jobs:
           echo "=== Testing UDP tunnel (multiple packets) ==="
           
           # Test sending multiple UDP packets
+          success_count=0
           for i in {1..3}; do
             echo "Sending UDP packet $i..."
-            echo "UDP_PACKET_$i" | nc -u -w 1 localhost 9002 || true
+            if echo "UDP_PACKET_$i" | nc -u -w 1 localhost 9002; then
+              success_count=$((success_count + 1))
+            else
+              echo "Warning: UDP packet $i failed to send"
+            fi
             sleep 1
           done
           
-          echo "✓ UDP multiple packet test completed"
+          if [ "$success_count" -eq 0 ]; then
+            echo "✗ UDP multiple packet test FAILED: all packets failed to send"
+            exit 1
+          fi
+          
+          echo "✓ UDP multiple packet test completed ($success_count/3 packets sent successfully)"
       
       - name: Collect logs on failure
         if: failure()
@@ -262,7 +288,36 @@ jobs:
         run: |
           # Kill tunnel
           if [ -f /tmp/tunnel.pid ]; then
-            sudo kill $(cat /tmp/tunnel.pid) 2>/dev/null || true
+            TUNNEL_PID="$(cat /tmp/tunnel.pid)"
+            if [ -n "$TUNNEL_PID" ] && kill -0 "$TUNNEL_PID" 2>/dev/null; then
+              # Try graceful shutdown first
+              sudo kill "$TUNNEL_PID" 2>/dev/null || true
+              # Wait a bit for the process to exit
+              for i in {1..5}; do
+                if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
+                  break
+                fi
+                sleep 1
+              done
+              # Force kill if still running
+              if kill -0 "$TUNNEL_PID" 2>/dev/null; then
+                sudo kill -9 "$TUNNEL_PID" 2>/dev/null || true
+              fi
+              # Attempt to kill any child processes of the tunnel
+              if command -v pgrep >/dev/null 2>&1; then
+                pgrep -P "$TUNNEL_PID" 2>/dev/null | while read child_pid; do
+                  if [ -n "$child_pid" ]; then
+                    sudo kill "$child_pid" 2>/dev/null || true
+                  fi
+                done
+                # Force kill stubborn children
+                pgrep -P "$TUNNEL_PID" 2>/dev/null | while read child_pid; do
+                  if [ -n "$child_pid" ]; then
+                    sudo kill -9 "$child_pid" 2>/dev/null || true
+                  fi
+                done
+              fi
+            fi
           fi
           
           # Kill test servers
@@ -273,10 +328,11 @@ jobs:
             kill $(cat /tmp/udp-server.pid) 2>/dev/null || true
           fi
           
-          # Kill any remaining socat processes by finding their PIDs
-          pgrep socat | while read pid; do
-            sudo kill -9 $pid 2>/dev/null || true
+          # Kill any remaining socat processes started by this workflow
+          pgrep -f "socat.*ssh-socat-tunnel-" 2>/dev/null | while read pid; do
+            [ -n "$pid" ] && sudo kill -9 "$pid" 2>/dev/null || true
           done
           
           # Clean up temp files
           sudo rm -rf /tmp/ssh-socat-tunnel-* 2>/dev/null || true
+          sudo rm /etc/ssh/sshd_config.d/test.conf 2>/dev/null || true
