@@ -1,0 +1,17 @@
+# Dockerfile for local server (separate from tunnel client)
+FROM ubuntu:22.04
+
+# Install dependencies
+RUN apt-get update && \
+    apt-get install -y \
+    socat \
+    netcat-openbsd \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy startup script
+COPY start-local-server.sh /start-local-server.sh
+RUN chmod +x /start-local-server.sh
+
+EXPOSE 8001 8002/udp
+
+CMD ["/start-local-server.sh"]

@@ -23,16 +23,14 @@ fi
 # Add remote to known hosts
 ssh-keyscan -H remote >> /root/.ssh/known_hosts 2>/dev/null
 
-# Start echo servers on local machine (these are the services we're tunneling)
-echo "Starting TCP echo server on port 8001..."
-socat -v TCP-LISTEN:8001,bind=127.0.0.1,reuseaddr,fork EXEC:'/bin/cat' &
-
-echo "Starting UDP echo server on port 8002..."
-socat -v UDP-LISTEN:8002,bind=127.0.0.1,reuseaddr,fork EXEC:'/bin/cat' &
-
-# Wait a bit for echo servers to start
-sleep 2
+# Wait for local-server to be ready
+echo "Waiting for local-server to be ready..."
+until nc -z local-server 8001; do
+    echo "Local-server not ready yet, waiting..."
+    sleep 1
+done
+echo "Local-server is ready!"
 
 # Start the tunnel
-echo "Starting SSH tunnel..."
+echo "Starting SSH tunnel to forward remote ports to local-server..."
 exec /app/tut -config /config/config.yaml

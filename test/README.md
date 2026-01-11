@@ -8,7 +8,7 @@ The `.github/workflows/test.yml` workflow automatically tests both TCP and UDP t
 
 ### Test Architecture
 
-The test uses Docker Compose to create 3 separate containers that simulate a realistic tunnel environment:
+The test uses Docker Compose to create 4 separate containers that simulate a realistic tunnel environment:
 
 ```
 ┌──────────────────────────────┐
@@ -26,18 +26,23 @@ The test uses Docker Compose to create 3 separate containers that simulate a rea
 │  - Accepts tunnel from local │
 │  - Exposes 9001 (TCP)        │
 │  - Exposes 9002 (UDP)        │
-│  - Has echo servers:         │
-│    * TCP on 127.0.0.1:8001   │
-│    * UDP on 127.0.0.1:8002   │
 └────────────▲─────────────────┘
              │
              │ SSH tunnel connection
              │
 ┌────────────┴─────────────────┐
-│  local (172.20.0.3)          │  Local Machine
+│  local (172.20.0.3)          │  Tunnel Client
 │  - tut client                │  (Simulates user's machine)
 │  - Establishes SSH tunnel    │
-│  - Creates port forwards     │
+│  - Forwards to local-server  │
+└────────────┬─────────────────┘
+             │
+             │ Forwards to local-server:8001/8002
+             ▼
+┌──────────────────────────────┐
+│  local-server (172.20.0.5)   │  Local Server
+│  - TCP echo server :8001     │  (Simulates separate local service)
+│  - UDP echo server :8002     │
 └──────────────────────────────┘
 ```
 
@@ -45,18 +50,22 @@ The test uses Docker Compose to create 3 separate containers that simulate a rea
 
 1. **Remote Container (VPS Simulation)**:
    - Runs SSH server on port 22
-   - Runs TCP echo server on 127.0.0.1:8001
-   - Runs UDP echo server on 127.0.0.1:8002
+   - Exposes forwarded ports 9001 (TCP) and 9002 (UDP)
    - Configured to accept port forwarding from the tunnel
 
 2. **Local Container (Tunnel Client)**:
    - Builds and runs tut
    - Connects to remote via SSH
    - Creates remote port forwards:
-     - TCP: remote:9001 → remote:127.0.0.1:8001
-     - UDP: remote:9002 → remote:127.0.0.1:8002 (via TCP wrapper)
+     - TCP: remote:9001 → local-server:8001 (via local tunnel client)
+     - UDP: remote:9002 → local-server:8002 (via TCP wrapper)
 
-3. **Test Client Container**:
+3. **Local Server Container (Separate Local Service)**:
+   - Runs TCP echo server on 0.0.0.0:8001
+   - Runs UDP echo server on 0.0.0.0:8002
+   - Represents a separate server on the local network (not the machine running tut)
+
+4. **Test Client Container**:
    - Sends test data to remote:9001 (TCP)
    - Sends test data to remote:9002 (UDP)
    - Verifies echo responses
@@ -91,14 +100,15 @@ docker compose down -v
 ### Test Coverage
 
 The workflow tests:
-- ✅ TCP tunnel establishment
-- ✅ TCP echo round-trip communication
+- ✅ TCP tunnel establishment from third-party client
+- ✅ TCP echo round-trip communication through full chain (test-client → remote → local → local-server)
 - ✅ TCP multiple sequential messages
-- ✅ UDP tunnel establishment (via TCP wrapper)
-- ✅ UDP packet transmission
+- ✅ UDP tunnel establishment from third-party client (via TCP wrapper)
+- ✅ UDP packet transmission through full chain (test-client → remote → local → local-server)
 - ✅ UDP multiple packets
 - ✅ Proper container isolation
-- ✅ Realistic multi-host environment
+- ✅ Realistic multi-host environment with separate local server
+- ✅ Tunnel forwarding to a different machine (local-server) on the local network
 
 ### Advantages of Docker-Based Testing
 

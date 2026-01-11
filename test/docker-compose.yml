@@ -44,6 +44,23 @@ services:
       - SSH_SERVER=remote
       - SSH_PORT=22
 
+  # Local server (separate server on local network, not the tunnel client)
+  local-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.local-server
+    container_name: tut-local-server
+    hostname: local-server
+    networks:
+      tunnel-net:
+        ipv4_address: 172.20.0.5
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "8001"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
   # Test client (for testing connectivity through tunnel)
   test-client:
     build:
@@ -59,6 +76,8 @@ services:
         condition: service_healthy
       local:
         condition: service_started
+      local-server:
+        condition: service_healthy
     command: /bin/bash -c "sleep infinity"
 
 networks:
