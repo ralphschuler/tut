@@ -20,7 +20,7 @@ RUN go mod download
 COPY . .
 
 # Build the tunnel binary
-RUN go build -o ssh-socat-tunnel .
+RUN go build -o tut .
 
 # Copy startup script
 COPY test/start-local.sh /start-local.sh

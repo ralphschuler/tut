@@ -27,7 +27,7 @@ info "Waiting for tunnel to establish..."
 TUNNEL_READY=0
 for i in {1..60}; do
     # Check if TCP port 9001 is accessible from test-client
-    if docker exec ssh-tunnel-test-client nc -z remote 9001 2>/dev/null; then
+    if docker exec tut-test-client nc -z remote 9001 2>/dev/null; then
         success "Tunnel is established (TCP port 9001 is accessible)"
         TUNNEL_READY=1
         break
@@ -39,14 +39,14 @@ done
 if [ "$TUNNEL_READY" -ne 1 ]; then
     error "Tunnel did not become ready within expected time"
     info "Showing tunnel logs:"
-    docker logs ssh-tunnel-local
+    docker logs tut-local
     exit 1
 fi
 
 # Test 1: TCP tunnel - Send and receive data
 echo ""
 info "Test 1: TCP Tunnel - Send and receive data"
-RESPONSE=$(docker exec ssh-tunnel-test-client bash -c 'echo "HELLO_TCP_TUNNEL" | nc -w 2 remote 9001')
+RESPONSE=$(docker exec tut-test-client bash -c 'echo "HELLO_TCP_TUNNEL" | nc -w 2 remote 9001')
 if [ "$RESPONSE" = "HELLO_TCP_TUNNEL" ]; then
     success "TCP tunnel test PASSED"
 else
@@ -60,7 +60,7 @@ fi
 echo ""
 info "Test 2: TCP Tunnel - Multiple sequential messages"
 for i in {1..3}; do
-    RESPONSE=$(docker exec ssh-tunnel-test-client bash -c "echo 'TCP_MESSAGE_$i' | nc -w 2 remote 9001")
+    RESPONSE=$(docker exec tut-test-client bash -c "echo 'TCP_MESSAGE_$i' | nc -w 2 remote 9001")
     if [ "$RESPONSE" != "TCP_MESSAGE_$i" ]; then
         error "TCP multiple messages test FAILED on message $i"
         echo "Expected: TCP_MESSAGE_$i"
@@ -78,14 +78,14 @@ info "Test 3: UDP Tunnel - Send and receive data"
 sleep 2
 
 # Try sending UDP packet
-RESPONSE=$(docker exec ssh-tunnel-test-client bash -c 'echo "HELLO_UDP_TUNNEL" | socat - UDP:remote:9002,shut-none' 2>&1 | head -n 1 || echo "")
+RESPONSE=$(docker exec tut-test-client bash -c 'echo "HELLO_UDP_TUNNEL" | socat - UDP:remote:9002,shut-none' 2>&1 | head -n 1 || echo "")
 
 if [ -n "$RESPONSE" ] && echo "$RESPONSE" | grep -q "HELLO_UDP_TUNNEL"; then
     success "UDP tunnel test PASSED"
 else
     # Fallback: verify tunnel port is at least open
     info "UDP echo response not received, verifying tunnel is established..."
-    if docker exec ssh-tunnel-test-client nc -u -z remote 9002 2>/dev/null; then
+    if docker exec tut-test-client nc -u -z remote 9002 2>/dev/null; then
         success "UDP tunnel established (port 9002 is listening)"
     else
         error "UDP tunnel test FAILED - port 9002 not accessible"
@@ -98,7 +98,7 @@ echo ""
 info "Test 4: UDP Tunnel - Multiple packets"
 SUCCESS_COUNT=0
 for i in {1..3}; do
-    if docker exec ssh-tunnel-test-client bash -c "echo 'UDP_PACKET_$i' | nc -u -w 1 remote 9002" 2>/dev/null; then
+    if docker exec tut-test-client bash -c "echo 'UDP_PACKET_$i' | nc -u -w 1 remote 9002" 2>/dev/null; then
         ((SUCCESS_COUNT++)) || true
     fi
     sleep 0.5
@@ -118,7 +118,7 @@ success "=== All tests PASSED ==="
 echo ""
 info "Container logs:"
 echo "--- Local (tunnel client) logs ---"
-docker logs ssh-tunnel-local | tail -n 20
+docker logs tut-local | tail -n 20
 echo ""
 echo "--- Remote (SSH server) logs ---"
-docker logs ssh-tunnel-remote | tail -n 20
+docker logs tut-remote | tail -n 20

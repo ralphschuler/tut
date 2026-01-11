@@ -1,5 +1,5 @@
-# Example configuration for ssh-socat-tunnel
-# Copy this file to /etc/ssh-tunnel/config.yaml and adjust values as needed.
+# Example configuration for tut (TCP UDP TUNNEL)
+# Copy this file to /etc/tut/config.yaml and adjust values as needed.
 
 vps:
   host: "your.vps.hostname"    # public IP or hostname of your VPS

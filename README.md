@@ -1,6 +1,6 @@
-# ssh-socat-tunnel
+# tut (TCP UDP TUNNEL)
 
-**ssh-socat-tunnel** is a lightweight tool to expose local TCP and UDP services through a remote VPS using `ssh` and `socat`.
+**tut** is a lightweight tool to expose local TCP and UDP services through a remote VPS using `ssh` and `socat`.
 
 The program reads a YAML configuration describing your VPS and a set of TCP and UDP forward definitions. It then:
 
@@ -27,7 +27,7 @@ The result is that services running on your local machine (even those listening 
 
 ## Usage
 
-1. Copy `config.yaml.example` to `/etc/ssh-tunnel/config.yaml` (or any path you prefer) and edit the values:
+1. Copy `config.yaml.example` to `/etc/tut/config.yaml` (or any path you prefer) and edit the values:
 
    ```yaml
    vps:
@@ -49,13 +49,13 @@ The result is that services running on your local machine (even those listening 
 2. Build the binary:
 
    ```bash
-   go build -o ssh-socat-tunnel ./ssh-socat-tunnel
+   go build -o tut .
    ```
 
 3. Run the tunnel as root (binding low ports requires privileges):
 
    ```bash
-   sudo ./ssh-socat-tunnel -config /etc/ssh-tunnel/config.yaml
+   sudo ./tut -config /etc/tut/config.yaml
    ```
 
 The program will log its actions and reconnect if the SSH session drops.
@@ -66,13 +66,13 @@ For production use you should run the tunnel as a supervised service. On systemd
 
 ```ini
 [Unit]
-Description=SSH Socat UDP Tunnel
+Description=TUT - TCP UDP Tunnel
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/ssh-socat-tunnel -config /etc/ssh-tunnel/config.yaml
+ExecStart=/usr/local/bin/tut -config /etc/tut/config.yaml
 Restart=always
 RestartSec=2
 User=root
@@ -85,7 +85,7 @@ Reload systemd and enable the service:
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now ssh-socat-tunnel
+sudo systemctl enable --now tut
 ```
 
 ### Cross‑compilation
@@ -93,7 +93,7 @@ sudo systemctl enable --now ssh-socat-tunnel
 The code does not use any cgo features, so Go can cross‑compile it easily. Example for Linux ARM64:
 
 ```bash
-GOOS=linux GOARCH=arm64 go build -o ssh-socat-tunnel-linux-arm64 ./ssh-socat-tunnel
+GOOS=linux GOARCH=arm64 go build -o tut-linux-arm64 .
 ```
 
 ## GitHub Actions

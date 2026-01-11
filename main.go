@@ -185,7 +185,7 @@ func startLocalWrappers(cfg *Config) ([]*child, error) {
 	}
 
 	// Create secure temporary directory for FIFOs
-	tmpDir, err := os.MkdirTemp("", "ssh-socat-tunnel-*")
+	tmpDir, err := os.MkdirTemp("", "tut-*")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temp directory: %w", err)
 	}
@@ -327,7 +327,7 @@ func buildRemoteScript(cfg *Config) string {
 	b.WriteString(`if [ -z "$SOCAT_BIN" ]; then echo "ERROR: socat not found on VPS. PATH=$PATH" >&2; exit 1; fi; `)
 	b.WriteString(`pids=""; `)
 	// Create secure temporary directory for FIFOs
-	b.WriteString(`FIFO_DIR="$(mktemp -d -t ssh-socat-tunnel-XXXXXX)"; `)
+	b.WriteString(`FIFO_DIR="$(mktemp -d -t tut-XXXXXX)"; `)
 	b.WriteString(`cleanup(){ for p in $pids; do kill "$p" 2>/dev/null || true; done; rm -rf "$FIFO_DIR" 2>/dev/null || true; }; `)
 	b.WriteString(`trap cleanup INT TERM EXIT; `)
 	if len(cfg.UDPForwards) == 0 {
@@ -380,7 +380,7 @@ func runTunnel(ctx context.Context, cfg *Config, localWrappers []*child) error {
 }
 
 func main() {
-	configPath := flag.String("config", "/etc/ssh-tunnel/config.yaml", "Path to config file")
+	configPath := flag.String("config", "/etc/tut/config.yaml", "Path to config file")
 	flag.Parse()
 
 	requireBinary("ssh")

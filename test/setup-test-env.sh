@@ -10,7 +10,7 @@ mkdir -p config
 # Generate SSH key pair if it doesn't exist
 if [ ! -f ssh-keys/id_ed25519 ]; then
     echo "Generating SSH key pair..."
-    ssh-keygen -t ed25519 -f ssh-keys/id_ed25519 -N "" -C "test@ssh-socat-tunnel"
+    ssh-keygen -t ed25519 -f ssh-keys/id_ed25519 -N "" -C "test@tut"
     echo "SSH key pair generated"
 else
     echo "SSH key pair already exists"

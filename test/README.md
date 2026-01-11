@@ -1,6 +1,6 @@
-# Testing SSH-Socat-Tunnel
+# Testing TUT (TCP UDP TUNNEL)
 
-This directory contains test infrastructure for the ssh-socat-tunnel project.
+This directory contains test infrastructure for the tut project.
 
 ## GitHub Actions Testing
 
@@ -35,7 +35,7 @@ The test uses Docker Compose to create 3 separate containers that simulate a rea
              │
 ┌────────────┴─────────────────┐
 │  local (172.20.0.3)          │  Local Machine
-│  - ssh-socat-tunnel client   │  (Simulates user's machine)
+│  - tut client                │  (Simulates user's machine)
 │  - Establishes SSH tunnel    │
 │  - Creates port forwards     │
 └──────────────────────────────┘
@@ -50,7 +50,7 @@ The test uses Docker Compose to create 3 separate containers that simulate a rea
    - Configured to accept port forwarding from the tunnel
 
 2. **Local Container (Tunnel Client)**:
-   - Builds and runs ssh-socat-tunnel
+   - Builds and runs tut
    - Connects to remote via SSH
    - Creates remote port forwards:
      - TCP: remote:9001 → remote:127.0.0.1:8001
