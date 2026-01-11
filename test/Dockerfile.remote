@@ -37,6 +37,9 @@ RUN ssh-keygen -A
 COPY start-remote.sh /start-remote.sh
 RUN chmod +x /start-remote.sh
 
+# Create log directory with proper permissions
+RUN mkdir -p /var/log && chmod 777 /var/log
+
 EXPOSE 22 9001 9002/udp
 
 CMD ["/start-remote.sh"]
