@@ -56,7 +56,8 @@ services:
       tunnel-net:
         ipv4_address: 172.20.0.4
     depends_on:
-      - remote
+      remote:
+        condition: service_healthy
     command: /bin/bash -c "sleep infinity"
 
 networks:

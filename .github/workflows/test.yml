@@ -37,7 +37,9 @@ jobs:
         run: |
           cd test
           echo "Waiting for services to be healthy..."
-          timeout 120 bash -c 'until docker compose ps | grep -q "healthy"; do echo "Waiting for health checks..."; sleep 2; done' || true
+          
+          # Wait for remote service to be healthy
+          timeout 120 bash -c 'until docker inspect --format="{{.State.Health.Status}}" ssh-tunnel-remote 2>/dev/null | grep -q "healthy"; do echo "Waiting for remote service health check..."; sleep 2; done'
           
           # Give additional time for tunnel to establish
           echo "Waiting for tunnel to establish..."
@@ -49,10 +51,10 @@ jobs:
           
           # Show initial logs
           echo "=== Remote container logs ==="
-          docker logs remote
+          docker compose logs remote
           echo ""
           echo "=== Local container logs ==="
-          docker logs local
+          docker compose logs local
       
       - name: Run tests
         run: |
@@ -64,13 +66,13 @@ jobs:
         run: |
           cd test
           echo "=== Local container logs ==="
-          docker logs local || true
+          docker compose logs local || true
           echo ""
           echo "=== Remote container logs ==="
-          docker logs remote || true
+          docker compose logs remote || true
           echo ""
           echo "=== Test client logs ==="
-          docker logs test-client || true
+          docker compose logs test-client || true
           echo ""
           echo "=== Container status ==="
           docker compose ps || true
