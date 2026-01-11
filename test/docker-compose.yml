@@ -4,7 +4,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.remote
-    container_name: ssh-tunnel-remote
+    container_name: tut-remote
     hostname: remote
     networks:
       tunnel-net:
@@ -29,7 +29,7 @@ services:
     build:
       context: ..
       dockerfile: test/Dockerfile.local
-    container_name: ssh-tunnel-local
+    container_name: tut-local
     hostname: local
     networks:
       tunnel-net:
@@ -49,7 +49,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.test-client
-    container_name: ssh-tunnel-test-client
+    container_name: tut-test-client
     hostname: test-client
     networks:
       tunnel-net:
