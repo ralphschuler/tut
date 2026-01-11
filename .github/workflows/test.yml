@@ -38,8 +38,8 @@ jobs:
           cd test
           echo "Waiting for services to be healthy..."
           
-          # Wait for remote service to be healthy
-          timeout 120 bash -c 'until docker inspect --format="{{.State.Health.Status}}" ssh-tunnel-remote 2>/dev/null | grep -q "healthy"; do echo "Waiting for remote service health check..."; sleep 2; done'
+          # Wait for remote service to be healthy using docker compose ps
+          timeout 120 bash -c 'until docker compose ps remote | grep -q "(healthy)"; do echo "Waiting for remote service health check..."; sleep 2; done'
           
           # Give additional time for tunnel to establish
           echo "Waiting for tunnel to establish..."
