@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  # SSH server (VPS simulation)
+  remote:
+    build:
+      context: .
+      dockerfile: Dockerfile.remote
+    container_name: ssh-tunnel-remote
+    hostname: remote
+    networks:
+      tunnel-net:
+        ipv4_address: 172.20.0.2
+    ports:
+      - "2222:22"
+      - "9001:9001"  # TCP tunnel endpoint
+      - "9002:9002/udp"  # UDP tunnel endpoint
+    volumes:
+      - ./ssh-keys:/ssh-keys:ro
+    environment:
+      - SSH_PORT=22
+
+  # Local machine (tunnel client)
+  local:
+    build:
+      context: ..
+      dockerfile: test/Dockerfile.local
+    container_name: ssh-tunnel-local
+    hostname: local
+    networks:
+      tunnel-net:
+        ipv4_address: 172.20.0.3
+    depends_on:
+      - remote
+    volumes:
+      - ./ssh-keys:/ssh-keys:ro
+      - ./config:/config:ro
+      - ..:/app
+    environment:
+      - SSH_SERVER=remote
+      - SSH_PORT=22
+    command: /bin/bash -c "sleep infinity"
+
+  # Test client (for testing connectivity through tunnel)
+  test-client:
+    build:
+      context: .
+      dockerfile: Dockerfile.test-client
+    container_name: ssh-tunnel-test-client
+    hostname: test-client
+    networks:
+      tunnel-net:
+        ipv4_address: 172.20.0.4
+    depends_on:
+      - remote
+    command: /bin/bash -c "sleep infinity"
+
+networks:
+  tunnel-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

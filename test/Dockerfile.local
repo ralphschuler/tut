@@ -1,0 +1,28 @@
+# Dockerfile for local machine (tunnel client)
+FROM golang:1.21-bullseye
+
+# Install dependencies
+RUN apt-get update && \
+    apt-get install -y \
+    openssh-client \
+    socat \
+    netcat-openbsd \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy go module files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the tunnel binary
+RUN go build -o ssh-socat-tunnel .
+
+# Copy startup script
+COPY test/start-local.sh /start-local.sh
+RUN chmod +x /start-local.sh
+
+CMD ["/start-local.sh"]

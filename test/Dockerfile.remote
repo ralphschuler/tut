@@ -1,0 +1,42 @@
+# Dockerfile for SSH server (remote/VPS)
+FROM ubuntu:22.04
+
+# Install dependencies
+RUN apt-get update && \
+    apt-get install -y \
+    openssh-server \
+    socat \
+    netcat-openbsd \
+    && rm -rf /var/lib/apt/lists/*
+
+# Configure SSH
+RUN mkdir /var/run/sshd && \
+    mkdir -p /root/.ssh && \
+    chmod 700 /root/.ssh
+
+# Create a non-root user for SSH
+RUN useradd -m -s /bin/bash testuser && \
+    mkdir -p /home/testuser/.ssh && \
+    chmod 700 /home/testuser/.ssh && \
+    chown -R testuser:testuser /home/testuser/.ssh
+
+# SSH configuration
+RUN echo "Port 22" >> /etc/ssh/sshd_config && \
+    echo "PermitRootLogin no" >> /etc/ssh/sshd_config && \
+    echo "PubkeyAuthentication yes" >> /etc/ssh/sshd_config && \
+    echo "PasswordAuthentication no" >> /etc/ssh/sshd_config && \
+    echo "AllowTcpForwarding yes" >> /etc/ssh/sshd_config && \
+    echo "GatewayPorts clientspecified" >> /etc/ssh/sshd_config && \
+    echo "AllowStreamLocalForwarding yes" >> /etc/ssh/sshd_config && \
+    echo "X11Forwarding no" >> /etc/ssh/sshd_config
+
+# Generate SSH host keys
+RUN ssh-keygen -A
+
+# Copy startup script
+COPY start-remote.sh /start-remote.sh
+RUN chmod +x /start-remote.sh
+
+EXPOSE 22 9001 9002/udp
+
+CMD ["/start-remote.sh"]

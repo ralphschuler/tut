@@ -4,151 +4,88 @@ This directory contains test infrastructure for the ssh-socat-tunnel project.
 
 ## GitHub Actions Testing
 
-The `.github/workflows/test.yml` workflow automatically tests both TCP and UDP tunnel functionality on every push and pull request.
+The `.github/workflows/test.yml` workflow automatically tests both TCP and UDP tunnel functionality on every push and pull request using Docker containers.
 
 ### Test Architecture
 
-The test sets up a complete tunnel environment in GitHub Actions:
+The test uses Docker Compose to create 3 separate containers that simulate a realistic tunnel environment:
 
 ```
-                ┌───────────────────────────────────┐
-                │   Remote Test Environment         │
-                │                                   │
-                │   ┌───────────────────────────┐   │
-                │   │ Test Client (TCP)         │   │
-                │   │ connects to remote 9001   │   │
-                │   └─────────────┬─────────────┘   │
-                │                 │                 │
-                │   ┌─────────────▼─────────────┐   │
-                │   │ Test Client (UDP)         │   │
-                │   │ connects to remote 9002   │   │
-                │   └─────────────┬─────────────┘   │
-                └─────────────────│─────────────────┘
-                                  │
-                                  │  SSH connection
-                                  ▼
-                      ┌───────────────────────────────┐
-                      │ SSH Server (localhost:2222)   │
-                      │ - Remote 9001 → 127.0.0.1:8001│
-                      │ - Remote 9002 → 127.0.0.1:8002│
-                      └───────────────┬───────────────┘
-                                      │
-                                      │  SSH tunnel
-                                      ▼
-┌─────────────────────────────────────────────────────────────┐
-│ GitHub Actions Runner (localhost)                           │
-│                                                              │
-│  ┌──────────────┐         ┌──────────────┐                 │
-│  │ TCP Server   │         │ UDP Server   │                 │
-│  │ listens 8001 │         │ listens 8002 │                 │
-│  └──────┬───────┘         └──────┬───────┘                 │
-│         │                        │                          │
-│         │                        │                          │
-│  ┌──────▼─────────────────────┬──▼─────────────┐          │
-│  │ Local socat wrappers       │                 │          │
-│  │ (for UDP → TCP conversion) │                 │          │
-│  └────────────┬───────────────┴─────────────────┘          │
-│               │                                             │
-│               │ ssh-socat-tunnel                            │
-│               │ (manages SSH tunnel and wrappers)           │
-└───────────────┴──────────────────────────────────────────────┘
+┌──────────────────────────────┐
+│  test-client (172.20.0.4)    │  Test Client
+│  - Sends test data           │  (Simulates external users)
+│  - Verifies connectivity     │
+└────────────┬─────────────────┘
+             │
+             │ Connects to remote:9001 (TCP)
+             │            remote:9002 (UDP)
+             ▼
+┌──────────────────────────────┐
+│  remote (172.20.0.2)         │  VPS/SSH Server
+│  - SSH server on port 22     │  (Simulates remote server)
+│  - Accepts tunnel from local │
+│  - Exposes 9001 (TCP)        │
+│  - Exposes 9002 (UDP)        │
+│  - Has echo servers:         │
+│    * TCP on 127.0.0.1:8001   │
+│    * UDP on 127.0.0.1:8002   │
+└────────────▲─────────────────┘
+             │
+             │ SSH tunnel connection
+             │
+┌────────────┴─────────────────┐
+│  local (172.20.0.3)          │  Local Machine
+│  - ssh-socat-tunnel client   │  (Simulates user's machine)
+│  - Establishes SSH tunnel    │
+│  - Creates port forwards     │
+└──────────────────────────────┘
 ```
 
-### Test Procedure
+### How It Works
 
-1. **Setup Phase**:
-   - Install socat and SSH server
-   - Generate SSH keys for testing
-   - Configure SSH server on port 2222
-   - Build the tunnel binary
+1. **Remote Container (VPS Simulation)**:
+   - Runs SSH server on port 22
+   - Runs TCP echo server on 127.0.0.1:8001
+   - Runs UDP echo server on 127.0.0.1:8002
+   - Configured to accept port forwarding from the tunnel
 
-2. **Service Setup**:
-   - Start TCP echo server on port 8001
-   - Start UDP echo server on port 8002
-   - Create test configuration file
-   - Start the tunnel
+2. **Local Container (Tunnel Client)**:
+   - Builds and runs ssh-socat-tunnel
+   - Connects to remote via SSH
+   - Creates remote port forwards:
+     - TCP: remote:9001 → remote:127.0.0.1:8001
+     - UDP: remote:9002 → remote:127.0.0.1:8002 (via TCP wrapper)
 
-3. **TCP Tests**:
-   - Send data through TCP tunnel (port 9001 → 8001)
-   - Verify echo round-trip communication
-   - Test multiple sequential messages
-
-4. **UDP Tests**:
-   - Send data through UDP tunnel (port 9002 → 8002)
-   - Verify packets can be transmitted
-   - Test multiple packets
+3. **Test Client Container**:
+   - Sends test data to remote:9001 (TCP)
+   - Sends test data to remote:9002 (UDP)
+   - Verifies echo responses
 
 ### Running Tests Locally
 
-While the tests are designed to run in GitHub Actions, you can simulate the test environment locally:
+You can run the same tests locally using Docker:
 
 ```bash
-# Install dependencies (Ubuntu/Debian)
-sudo apt-get install socat openssh-server netcat-openbsd
+# Setup test environment (generates SSH keys and config)
+cd test
+bash setup-test-env.sh
 
-# Set up SSH server on custom port
-sudo ssh-keygen -A
-ssh-keygen -t ed25519 -f ~/.ssh/test_key -N ""
-cat ~/.ssh/test_key.pub >> ~/.ssh/authorized_keys
+# Build and start containers
+docker compose build
+docker compose up -d
 
-# Configure SSH server (e.g. add to /etc/ssh/sshd_config.d/test.conf):
-#   Port 2222
-#   PubkeyAuthentication yes
-
-# Restart or start SSH on the custom port:
-# If using systemd, restart the SSH service:
-sudo systemctl restart ssh || sudo systemctl restart sshd
-# Or run a one-off sshd instance on port 2222:
-sudo /usr/sbin/sshd -p 2222
-
-# Build the tunnel
-go build -o ssh-socat-tunnel .
-
-# Example: create a minimal test config
-cat > /tmp/test-config.yaml << 'EOF'
-vps:
-  host: "localhost"
-  user: "$USER"
-  port: 2222
-  ssh_key: "$HOME/.ssh/test_key"
-  strict_hostkey: "no"
-
-reconnect_delay_seconds: 2
-
-tcp_forwards:
-  - remote_port: 9001
-    local_host: "127.0.0.1"
-    local_port: 8001
-
-udp_forwards:
-  - udp_public_port: 9002
-    local_host: "127.0.0.1"
-    local_udp_port: 8002
-    wrap_tcp_port: 10000
-EOF
-
-# Start local TCP and UDP echo servers (as in CI)
-socat -v TCP-LISTEN:8001,bind=127.0.0.1,reuseaddr,fork EXEC:'/bin/cat' > /tmp/tcp-server.log 2>&1 &
-TCP_SERVER_PID=$!
-socat -v UDP-LISTEN:8002,bind=127.0.0.1,reuseaddr,fork EXEC:'/bin/cat' > /tmp/udp-server.log 2>&1 &
-UDP_SERVER_PID=$!
-
-# Run tunnel using the test config
-sudo ./ssh-socat-tunnel -config /tmp/test-config.yaml &
-TUNNEL_PID=$!
-
-# Wait for tunnel to establish
+# Wait a few seconds for tunnel to establish
 sleep 10
 
-# Test TCP tunnel
-echo "HELLO_TCP" | nc -w 2 localhost 9001
+# Run tests
+bash run-docker-tests.sh
 
-# Test UDP tunnel
-echo "HELLO_UDP" | nc -u -w 2 localhost 9002
+# View logs
+docker logs local    # Tunnel client logs
+docker logs remote   # SSH server logs
 
-# Cleanup background processes
-sudo kill "$TUNNEL_PID"
-kill "$TCP_SERVER_PID" "$UDP_SERVER_PID"
+# Stop and clean up
+docker compose down -v
 ```
 
 ### Test Coverage
@@ -157,15 +94,55 @@ The workflow tests:
 - ✅ TCP tunnel establishment
 - ✅ TCP echo round-trip communication
 - ✅ TCP multiple sequential messages
-- ✅ UDP tunnel establishment
+- ✅ UDP tunnel establishment (via TCP wrapper)
 - ✅ UDP packet transmission
 - ✅ UDP multiple packets
-- ✅ Automatic cleanup
+- ✅ Proper container isolation
+- ✅ Realistic multi-host environment
+
+### Advantages of Docker-Based Testing
+
+- **Isolation**: Each component runs in its own container
+- **Reproducibility**: Same environment every time
+- **Realistic**: Simulates actual multi-host deployment
+- **No port conflicts**: Containers use internal networking
+- **Clean state**: Fresh environment for each test run
+- **Easy debugging**: Can inspect logs and exec into containers
 
 ### Troubleshooting
 
-If tests fail, check the logs output in the "Collect logs on failure" step:
-- Tunnel logs show the main tunnel process output
-- TCP/UDP server logs show the echo server activity
-- Socat logs show the FIFO wrapper processes
-- Network connections show active ports and listeners
+If tests fail:
+
+1. **Check container status**:
+   ```bash
+   cd test
+   docker compose ps
+   ```
+
+2. **View logs**:
+   ```bash
+   docker logs local    # Tunnel client
+   docker logs remote   # SSH server
+   docker logs test-client
+   ```
+
+3. **Exec into containers**:
+   ```bash
+   docker exec -it local /bin/bash
+   docker exec -it remote /bin/bash
+   docker exec -it test-client /bin/bash
+   ```
+
+4. **Test connectivity manually**:
+   ```bash
+   # From test-client, try to connect to tunnel endpoints
+   docker exec test-client nc -z remote 9001
+   docker exec test-client nc -u -z remote 9002
+   ```
+
+5. **Rebuild containers**:
+   ```bash
+   docker compose down -v
+   docker compose build --no-cache
+   docker compose up -d
+   ```

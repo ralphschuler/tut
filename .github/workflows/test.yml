@@ -15,372 +15,51 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Set up Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: '1.21'
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
       
-      - name: Install dependencies
+      - name: Setup test environment
         run: |
-          # Install dependencies for tunnel testing
-          sudo apt-get update
-          sudo apt-get install -y socat openssh-server netcat-openbsd
+          cd test
+          bash setup-test-env.sh
       
-      - name: Setup SSH server
+      - name: Build and start Docker containers
         run: |
-          # Generate SSH host keys
-          sudo ssh-keygen -A
+          cd test
+          docker compose build
+          docker compose up -d
           
-          # Generate SSH key pair for testing
-          mkdir -p ~/.ssh
-          ssh-keygen -t ed25519 -f ~/.ssh/test_key -N ""
-          cat ~/.ssh/test_key.pub >> ~/.ssh/authorized_keys
-          chmod 600 ~/.ssh/authorized_keys
-          chmod 700 ~/.ssh
-          
-          # Stop the socket-activated SSH service to prevent port conflicts
-          sudo systemctl stop ssh.socket || true
-          sudo systemctl stop ssh || true
-          
-          # Create privilege separation directory required by sshd
-          sudo mkdir -p /run/sshd
-          sudo chmod 0755 /run/sshd
-          
-          # Create a minimal SSH server configuration for testing
-          sudo tee /etc/ssh/sshd_config_test > /dev/null <<EOF
-          # Minimal sshd_config for testing
-          Port 2222
-          ListenAddress 0.0.0.0
-          
-          # Authentication
-          PermitRootLogin no
-          PubkeyAuthentication yes
-          PasswordAuthentication no
-          ChallengeResponseAuthentication no
-          UsePAM yes
-          
-          # Forwarding
-          AllowTcpForwarding yes
-          AllowStreamLocalForwarding yes
-          GatewayPorts clientspecified
-          
-          # Security
-          StrictModes yes
-          
-          # Logging
-          SyslogFacility AUTH
-          LogLevel INFO
-          
-          # Host keys
-          HostKey /etc/ssh/ssh_host_rsa_key
-          HostKey /etc/ssh/ssh_host_ecdsa_key
-          HostKey /etc/ssh/ssh_host_ed25519_key
-          
-          # Other
-          AcceptEnv LANG LC_*
-          Subsystem sftp /usr/lib/openssh/sftp-server
-          PrintMotd no
-          EOF
-          
-          # Start SSH server directly with our test config
-          sudo /usr/sbin/sshd -f /etc/ssh/sshd_config_test
-          
-          # Wait for SSH to be ready and verify it's on port 2222
-          sleep 2
-          
-          # Check if SSH is listening on port 2222
-          if ! ss -tlnp | grep ':2222'; then
-            echo "ERROR: SSH server is not listening on port 2222"
-            echo "Current listening ports:"
-            ss -tlnp | grep sshd || true
-            exit 1
-          fi
-          
-          echo "SSH server is listening on port 2222"
-          
-          # Test SSH connection
-          ssh -i ~/.ssh/test_key -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $USER@localhost echo "SSH test successful"
-      
-      - name: Build the tunnel binary
-        run: |
-          go build -o ssh-socat-tunnel .
-          chmod +x ssh-socat-tunnel
-      
-      - name: Create test configuration
-        run: |
-          mkdir -p /tmp/test-config
-          cat > /tmp/test-config/config.yaml <<EOF
-          vps:
-            host: "localhost"
-            user: "$USER"
-            port: 2222
-            ssh_key: "$HOME/.ssh/test_key"
-            strict_hostkey: "no"
-          
-          reconnect_delay_seconds: 2
-          
-          tcp_forwards:
-            - remote_port: 9001
-              local_host: "127.0.0.1"
-              local_port: 8001
-          
-          udp_forwards:
-            - udp_public_port: 9002
-              local_host: "127.0.0.1"
-              local_udp_port: 8002
-              wrap_tcp_port: 10000
-          EOF
-          cat /tmp/test-config/config.yaml
-      
-      - name: Start TCP test server
-        run: |
-          # Start a TCP echo server on port 8001
-          nohup socat -v TCP-LISTEN:8001,bind=127.0.0.1,reuseaddr,fork EXEC:'/bin/cat' > /tmp/tcp-server.log 2>&1 &
-          echo $! > /tmp/tcp-server.pid
-          sleep 1
-          
-          # Verify TCP server is running
-          echo "Testing TCP server..."
-          echo "TCP_TEST" | nc -w 1 127.0.0.1 8001
-      
-      - name: Start UDP test server
-        run: |
-          # Start a UDP echo server on port 8002
-          nohup socat -v UDP-LISTEN:8002,bind=127.0.0.1,reuseaddr,fork EXEC:'/bin/cat' > /tmp/udp-server.log 2>&1 &
-          echo $! > /tmp/udp-server.pid
+          # Wait for containers to be ready
+          echo "Waiting for containers to start..."
           sleep 5
           
-          # Verify UDP server is running
-          echo "Testing UDP server..."
-          echo "UDP_TEST" | nc -u -w 1 127.0.0.1 8002
+          # Check container status
+          docker compose ps
       
-      - name: Start SSH tunnel
+      - name: Run tests
         run: |
-          # Create log directory
-          sudo mkdir -p /var/log
-          sudo chmod 777 /var/log
-          
-          # Start the tunnel in background
-          nohup sudo -E ./ssh-socat-tunnel -config /tmp/test-config/config.yaml > /tmp/tunnel.log 2>&1 &
-          echo $! > /tmp/tunnel.pid
-          
-          # Wait for tunnel to establish by checking process and ports
-          echo "Waiting for tunnel to establish..."
-          TUNNEL_PID=$(cat /tmp/tunnel.pid)
-          TUNNEL_READY=0
-          for i in {1..60}; do
-            # Check if tunnel process is still running
-            if ! ps -p "$TUNNEL_PID" > /dev/null; then
-              echo "ERROR: Tunnel process died while waiting for readiness (PID: $TUNNEL_PID)"
-              echo "=== Tunnel logs ==="
-              cat /tmp/tunnel.log || true
-              exit 1
-            fi
-            
-            # Check if expected tunnel ports are listening (TCP 9001 and UDP 9002)
-            if nc -z localhost 9001 2>/dev/null && nc -u -z localhost 9002 2>/dev/null; then
-              echo "Tunnel is established (TCP 9001 and UDP 9002 are reachable)"
-              TUNNEL_READY=1
-              break
-            fi
-            
-            echo "Waiting for tunnel ports to become ready... (attempt $i/60)"
-            sleep 1
-          done
-          
-          if [ "$TUNNEL_READY" -ne 1 ]; then
-            echo "ERROR: Tunnel did not become ready within the expected time"
-            echo "=== Tunnel logs ==="
-            cat /tmp/tunnel.log || true
-            exit 1
-          fi
-          
-          # Show tunnel logs
-          echo "=== Tunnel logs ==="
-          cat /tmp/tunnel.log || true
-          
-          # Final check: ensure tunnel process is still running
-          if ps -p "$TUNNEL_PID" > /dev/null; then
-            echo "Tunnel process is running (PID: $TUNNEL_PID)"
-          else
-            echo "ERROR: Tunnel process died after readiness check"
-            cat /tmp/tunnel.log || true
-            exit 1
-          fi
+          cd test
+          bash run-docker-tests.sh
       
-      - name: Test TCP tunnel - Send data
-        run: |
-          echo "=== Testing TCP tunnel ==="
-          
-          # Wait for remote port to be ready
-          for i in {1..30}; do
-            if nc -z localhost 9001 2>/dev/null; then
-              echo "TCP port 9001 is ready"
-              break
-            fi
-            echo "Waiting for TCP port 9001... (attempt $i/30)"
-            sleep 1
-          done
-          
-          # Send test data through the tunnel
-          echo "Sending data through TCP tunnel..."
-          response=$(echo "HELLO_TCP_TUNNEL" | nc -w 2 localhost 9001)
-          echo "Response: $response"
-          
-          # Verify response
-          if [ "$response" = "HELLO_TCP_TUNNEL" ]; then
-            echo "✓ TCP tunnel test PASSED"
-          else
-            echo "✗ TCP tunnel test FAILED"
-            echo "Expected: HELLO_TCP_TUNNEL"
-            echo "Got: $response"
-            exit 1
-          fi
-      
-      - name: Test TCP tunnel - Multiple messages
-        run: |
-          echo "=== Testing TCP tunnel - Multiple messages ==="
-          
-          # Send multiple messages to test stability
-          for i in {1..3}; do
-            response=$(echo "TCP_MESSAGE_$i" | nc -w 2 localhost 9001)
-            echo "Message $i response: $response"
-            if [ "$response" != "TCP_MESSAGE_$i" ]; then
-              echo "✗ TCP multiple messages test FAILED on message $i"
-              exit 1
-            fi
-            sleep 1
-          done
-          
-          echo "✓ TCP multiple messages test PASSED"
-      
-      - name: Test UDP tunnel - Send data
-        run: |
-          echo "=== Testing UDP tunnel ==="
-          
-          # Wait for remote UDP port to be ready
-          sleep 5
-          
-          # Send test data through the UDP tunnel using socat for more reliable testing
-          echo "Sending data through UDP tunnel..."
-          
-          # Use socat for bidirectional UDP test
-          response=$(echo "HELLO_UDP_TUNNEL" | socat - UDP:localhost:9002,shut-none 2>&1 | head -n 1 || echo "")
-          echo "Response: '$response'"
-          
-          # Check if we got a response
-          if [ -n "$response" ] && echo "$response" | grep -q "HELLO_UDP_TUNNEL"; then
-            echo "✓ UDP tunnel test PASSED"
-          else
-            # Fallback: verify tunnel is up by checking listening ports
-            echo "UDP echo response not received, verifying tunnel is established..."
-            if nc -u -z localhost 9002 2>/dev/null; then
-              echo "✓ UDP tunnel established (port 9002 is listening)"
-            else
-              echo "✗ UDP tunnel test FAILED - port 9002 not listening"
-              exit 1
-            fi
-          fi
-      
-      - name: Test UDP tunnel - Multiple packets
-        run: |
-          echo "=== Testing UDP tunnel (multiple packets) ==="
-          
-          # Test sending multiple UDP packets
-          success_count=0
-          for i in {1..3}; do
-            echo "Sending UDP packet $i..."
-            if echo "UDP_PACKET_$i" | nc -u -w 1 localhost 9002; then
-              success_count=$((success_count + 1))
-            else
-              echo "Warning: UDP packet $i failed to send"
-            fi
-            sleep 1
-          done
-          
-          if [ "$success_count" -eq 0 ]; then
-            echo "✗ UDP multiple packet test FAILED: all packets failed to send"
-            exit 1
-          fi
-          
-          echo "✓ UDP multiple packet test completed ($success_count/3 packets sent successfully)"
-      
-      - name: Collect logs on failure
+      - name: Show logs on failure
         if: failure()
         run: |
-          echo "=== Tunnel logs ==="
-          cat /tmp/tunnel.log || true
+          cd test
+          echo "=== Local container logs ==="
+          docker logs local || true
           echo ""
-          echo "=== TCP server logs ==="
-          cat /tmp/tcp-server.log || true
+          echo "=== Remote container logs ==="
+          docker logs remote || true
           echo ""
-          echo "=== UDP server logs ==="
-          cat /tmp/udp-server.log || true
+          echo "=== Test client logs ==="
+          docker logs test-client || true
           echo ""
-          echo "=== Socat logs ==="
-          sudo cat /var/log/socat-*.log 2>/dev/null || true
-          echo ""
-          echo "=== Running processes ==="
-          ps aux | grep -E "(socat|ssh|tunnel)" || true
-          echo ""
-          echo "=== Network connections ==="
-          sudo netstat -tulpn | grep -E "(8001|8002|9001|9002|10000)" || true
+          echo "=== Container status ==="
+          docker compose ps || true
       
       - name: Cleanup
         if: always()
         run: |
-          # Kill tunnel
-          if [ -f /tmp/tunnel.pid ]; then
-            TUNNEL_PID="$(cat /tmp/tunnel.pid)"
-            if [ -n "$TUNNEL_PID" ] && kill -0 "$TUNNEL_PID" 2>/dev/null; then
-              # Try graceful shutdown first
-              sudo kill "$TUNNEL_PID" 2>/dev/null || true
-              # Wait a bit for the process to exit
-              for i in {1..5}; do
-                if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
-                  break
-                fi
-                sleep 1
-              done
-              # Force kill if still running
-              if kill -0 "$TUNNEL_PID" 2>/dev/null; then
-                sudo kill -9 "$TUNNEL_PID" 2>/dev/null || true
-              fi
-              # Attempt to kill any child processes of the tunnel
-              if command -v pgrep >/dev/null 2>&1; then
-                pgrep -P "$TUNNEL_PID" 2>/dev/null | while read child_pid; do
-                  if [ -n "$child_pid" ]; then
-                    sudo kill "$child_pid" 2>/dev/null || true
-                  fi
-                done
-                # Force kill stubborn children
-                pgrep -P "$TUNNEL_PID" 2>/dev/null | while read child_pid; do
-                  if [ -n "$child_pid" ]; then
-                    sudo kill -9 "$child_pid" 2>/dev/null || true
-                  fi
-                done
-              fi
-            fi
-          fi
-          
-          # Kill test servers
-          if [ -f /tmp/tcp-server.pid ]; then
-            kill $(cat /tmp/tcp-server.pid) 2>/dev/null || true
-          fi
-          if [ -f /tmp/udp-server.pid ]; then
-            kill $(cat /tmp/udp-server.pid) 2>/dev/null || true
-          fi
-          
-          # Kill any remaining socat processes started by this workflow
-          pgrep -f "socat.*ssh-socat-tunnel-" 2>/dev/null | while read pid; do
-            [ -n "$pid" ] && sudo kill -9 "$pid" 2>/dev/null || true
-          done
-          
-          # Kill the SSH server we started on port 2222
-          pgrep -f "sshd.*2222" 2>/dev/null | while read pid; do
-            [ -n "$pid" ] && sudo kill "$pid" 2>/dev/null || true
-          done
-          
-          # Clean up temp files
-          sudo rm -rf /tmp/ssh-socat-tunnel-* 2>/dev/null || true
-          sudo rm /etc/ssh/sshd_config_test 2>/dev/null || true
+          cd test
+          docker compose down -v || true
+
