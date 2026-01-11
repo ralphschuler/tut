@@ -25,14 +25,12 @@ The test workflow (`.github/workflows/test.yml`) runs automatically on:
 
 ## Test Architecture
 
-The test uses **Docker Compose** to create 3 separate containers that simulate a realistic deployment:
+The test uses **Docker Compose** to create 4 separate containers that simulate a realistic deployment:
 
 ### Container Setup
 
 1. **remote (172.20.0.2)** - VPS/SSH Server:
    - Runs SSH server on port 22
-   - Hosts TCP echo server on 127.0.0.1:8001
-   - Hosts UDP echo server on 127.0.0.1:8002
    - Accepts SSH tunnel connections from local container
    - Exposes forwarded ports 9001 (TCP) and 9002 (UDP)
 
@@ -40,10 +38,15 @@ The test uses **Docker Compose** to create 3 separate containers that simulate a
    - Builds and runs tut binary
    - Establishes SSH connection to remote
    - Creates port forwards:
-     - TCP: remote:9001 → remote:127.0.0.1:8001
-     - UDP: remote:9002 → remote:127.0.0.1:8002 (via TCP wrapper on port 10000)
+     - TCP: remote:9001 → local-server:8001 (via local tunnel)
+     - UDP: remote:9002 → local-server:8002 (via TCP wrapper on port 10000)
 
-3. **test-client (172.20.0.4)** - Test Client:
+3. **local-server (172.20.0.5)** - Separate Local Service:
+   - Hosts TCP echo server on 0.0.0.0:8001
+   - Hosts UDP echo server on 0.0.0.0:8002
+   - Represents a separate server on the local network (not the machine running tut)
+
+4. **test-client (172.20.0.4)** - Test Client:
    - Sends test data to remote:9001 (TCP)
    - Sends test data to remote:9002 (UDP)
    - Verifies echo responses
@@ -51,11 +54,12 @@ The test uses **Docker Compose** to create 3 separate containers that simulate a
 ### Why Docker?
 
 The Docker-based approach provides:
-- **Isolation**: Each component (client, server, test) runs in separate containers
-- **Realistic simulation**: Mimics actual multi-host deployment
+- **Isolation**: Each component (client, server, tunnel, local service) runs in separate containers
+- **Realistic simulation**: Mimics actual multi-host deployment with separate local server
 - **No port conflicts**: Uses internal Docker networking
 - **Reproducibility**: Same environment every test run
 - **Easier debugging**: Can inspect logs and exec into containers
+- **Third-party client testing**: Verifies that external clients can connect through the tunnel to a separate local server
 
 ## Viewing Test Results
 

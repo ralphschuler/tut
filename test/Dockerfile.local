@@ -8,12 +8,15 @@ RUN apt-get update && \
     openssh-client \
     socat \
     netcat-openbsd \
+    && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 # Copy go module files
 COPY go.mod go.sum ./
+
+# Download Go modules
 RUN go mod download
 
 # Copy source code

@@ -29,12 +29,12 @@ reconnect_delay_seconds: 2
 
 tcp_forwards:
   - remote_port: 9001
-    local_host: "127.0.0.1"
+    local_host: "local-server"
     local_port: 8001
 
 udp_forwards:
   - udp_public_port: 9002
-    local_host: "127.0.0.1"
+    local_host: "local-server"
     local_udp_port: 8002
     wrap_tcp_port: 10000
 EOF
