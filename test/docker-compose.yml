@@ -40,7 +40,6 @@ services:
     volumes:
       - ./ssh-keys:/ssh-keys:ro
       - ./config:/config:ro
-      - ..:/app
     environment:
       - SSH_SERVER=remote
       - SSH_PORT=22
