@@ -11,17 +11,6 @@ if [ -f /ssh-keys/id_ed25519.pub ]; then
     echo "SSH key installed for testuser"
 fi
 
-# Start TCP echo server on port 8001 (local service to tunnel)
-echo "Starting TCP echo server on port 8001..."
-socat -v TCP-LISTEN:8001,bind=127.0.0.1,reuseaddr,fork EXEC:'/bin/cat' &
-
-# Start UDP echo server on port 8002 (local service to tunnel)
-echo "Starting UDP echo server on port 8002..."
-socat -v UDP-LISTEN:8002,bind=127.0.0.1,reuseaddr,fork EXEC:'/bin/cat' &
-
-# Wait a bit for echo servers to start
-sleep 2
-
-# Start SSH server
+# Start SSH server (no echo servers here - they run on local machine)
 echo "Starting SSH server..."
 /usr/sbin/sshd -D -e
