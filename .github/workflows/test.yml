@@ -46,20 +46,44 @@ jobs:
           sudo mkdir -p /run/sshd
           sudo chmod 0755 /run/sshd
           
-          # Configure SSH server for port 2222
-          sudo tee /etc/ssh/sshd_config.d/test.conf > /dev/null <<EOF
+          # Create a minimal SSH server configuration for testing
+          sudo tee /etc/ssh/sshd_config_test > /dev/null <<EOF
+          # Minimal sshd_config for testing
           Port 2222
+          ListenAddress 0.0.0.0
+          
+          # Authentication
           PermitRootLogin no
           PubkeyAuthentication yes
           PasswordAuthentication no
-          GatewayPorts clientspecified
+          ChallengeResponseAuthentication no
+          UsePAM yes
+          
+          # Forwarding
           AllowTcpForwarding yes
           AllowStreamLocalForwarding yes
-          ListenAddress 0.0.0.0
+          GatewayPorts clientspecified
+          
+          # Security
+          StrictModes yes
+          
+          # Logging
+          SyslogFacility AUTH
+          LogLevel INFO
+          
+          # Host keys
+          HostKey /etc/ssh/ssh_host_rsa_key
+          HostKey /etc/ssh/ssh_host_ecdsa_key
+          HostKey /etc/ssh/ssh_host_ed25519_key
+          
+          # Other
+          AcceptEnv LANG LC_*
+          Subsystem sftp /usr/lib/openssh/sftp-server
+          PrintMotd no
           EOF
           
-          # Start SSH server directly (not through systemd to avoid socket conflicts)
-          sudo /usr/sbin/sshd -f /etc/ssh/sshd_config
+          # Start SSH server directly with our test config
+          sudo /usr/sbin/sshd -f /etc/ssh/sshd_config_test
           
           # Wait for SSH to be ready and verify it's on port 2222
           sleep 2
@@ -359,4 +383,4 @@ jobs:
           
           # Clean up temp files
           sudo rm -rf /tmp/ssh-socat-tunnel-* 2>/dev/null || true
-          sudo rm /etc/ssh/sshd_config.d/test.conf 2>/dev/null || true
+          sudo rm /etc/ssh/sshd_config_test 2>/dev/null || true
