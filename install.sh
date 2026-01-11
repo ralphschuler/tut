@@ -407,8 +407,10 @@ create_launchd_service() {
     
     CONFIG_PATH="${HOME}/.config/tut/config.yaml"
     PLIST_FILE="${HOME}/Library/LaunchAgents/com.tut.plist"
+    LOG_DIR="${HOME}/Library/Logs"
     
     mkdir -p "${HOME}/Library/LaunchAgents"
+    mkdir -p "$LOG_DIR"
     
     cat > "$PLIST_FILE" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -428,9 +430,9 @@ create_launchd_service() {
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/tmp/tut.log</string>
+    <string>$LOG_DIR/tut.log</string>
     <key>StandardErrorPath</key>
-    <string>/tmp/tut.err</string>
+    <string>$LOG_DIR/tut.err</string>
 </dict>
 </plist>
 EOF
@@ -570,7 +572,7 @@ print_instructions() {
             echo ""
             echo "  6. Check the service status:"
             echo "     launchctl list | grep tut"
-            echo "     tail -f /tmp/tut.log"
+            echo "     tail -f ${HOME}/Library/Logs/tut.log"
             ;;
         *)
             echo "  5. Start tut manually or create a service file"
