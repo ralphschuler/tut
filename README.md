@@ -25,7 +25,29 @@ The result is that services running on your local machine (even those listening 
 * `ssh` installed locally to establish the tunnel.
 * `socat` installed on both local and remote hosts to wrap UDP and forward traffic.
 
-## Usage
+## Installation
+
+### Automated Installation
+
+The easiest way to install tut is using the install script, which works on most Unix-like systems:
+
+```bash
+git clone https://github.com/ralphschuler/tut.git
+cd tut
+./install.sh
+```
+
+The install script will:
+* Detect your OS, architecture, and service manager
+* Install required dependencies (ssh, socat, go)
+* Build and install the tut binary to `/usr/local/bin`
+* Create a configuration file at `$HOME/.config/tut/config.yaml` (or `/etc/tut/config.yaml` if run as root)
+* Set up SSH keys if needed
+* Create and enable a service (systemd, openrc, runit, launchd, or BSD rc.d)
+
+After installation, edit the config file with your VPS details and start the service as instructed.
+
+### Manual Installation
 
 1. Copy `config.yaml.example` to `/etc/tut/config.yaml` (or any path you prefer) and edit the values:
 
