@@ -8,3 +8,7 @@ ssh-socat-tunnel
 # Go build cache
 bin/
 pkg/
+
+# Test environment files
+test/ssh-keys/
+test/config/
