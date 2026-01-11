@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # SSH server (VPS simulation)
   remote:
@@ -19,6 +17,12 @@ services:
       - ./ssh-keys:/ssh-keys:ro
     environment:
       - SSH_PORT=22
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "22"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
 
   # Local machine (tunnel client)
   local:
@@ -31,7 +35,8 @@ services:
       tunnel-net:
         ipv4_address: 172.20.0.3
     depends_on:
-      - remote
+      remote:
+        condition: service_healthy
     volumes:
       - ./ssh-keys:/ssh-keys:ro
       - ./config:/config:ro
@@ -39,7 +44,6 @@ services:
     environment:
       - SSH_SERVER=remote
       - SSH_PORT=22
-    command: /bin/bash -c "sleep infinity"
 
   # Test client (for testing connectivity through tunnel)
   test-client:

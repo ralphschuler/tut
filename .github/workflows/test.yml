@@ -23,18 +23,36 @@ jobs:
           cd test
           bash setup-test-env.sh
       
-      - name: Build and start Docker containers
+      - name: Build Docker images
         run: |
           cd test
-          docker compose build
+          docker compose build --no-cache
+      
+      - name: Start Docker containers
+        run: |
+          cd test
           docker compose up -d
+      
+      - name: Wait for services to be healthy
+        run: |
+          cd test
+          echo "Waiting for services to be healthy..."
+          timeout 120 bash -c 'until docker compose ps | grep -q "healthy"; do echo "Waiting for health checks..."; sleep 2; done' || true
           
-          # Wait for containers to be ready
-          echo "Waiting for containers to start..."
-          sleep 5
+          # Give additional time for tunnel to establish
+          echo "Waiting for tunnel to establish..."
+          sleep 10
           
           # Check container status
+          echo "Container status:"
           docker compose ps
+          
+          # Show initial logs
+          echo "=== Remote container logs ==="
+          docker logs remote
+          echo ""
+          echo "=== Local container logs ==="
+          docker logs local
       
       - name: Run tests
         run: |
@@ -56,6 +74,9 @@ jobs:
           echo ""
           echo "=== Container status ==="
           docker compose ps || true
+          echo ""
+          echo "=== Network inspection ==="
+          docker network inspect test_tunnel-net || true
       
       - name: Cleanup
         if: always()
