@@ -15,5 +15,8 @@ echo "Local server echo services started"
 echo "TCP echo: 0.0.0.0:8001"
 echo "UDP echo: 0.0.0.0:8002"
 
+# Give the echo servers a moment to start listening before blocking
+sleep 1
+
 # Keep container running and monitor the processes
 wait

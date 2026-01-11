@@ -16,8 +16,8 @@ WORKDIR /app
 # Copy go module files
 COPY go.mod go.sum ./
 
-# Download Go modules (retry with cert update if needed)
-RUN go mod download || (update-ca-certificates && go mod download)
+# Download Go modules
+RUN go mod download
 
 # Copy source code
 COPY . .
