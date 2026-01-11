@@ -26,4 +26,7 @@ RUN go build -o ssh-socat-tunnel .
 COPY test/start-local.sh /start-local.sh
 RUN chmod +x /start-local.sh
 
+# Create log directory with proper permissions
+RUN mkdir -p /var/log && chmod 777 /var/log
+
 CMD ["/start-local.sh"]
