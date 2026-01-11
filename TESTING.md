@@ -37,7 +37,7 @@ The test uses **Docker Compose** to create 3 separate containers that simulate a
    - Exposes forwarded ports 9001 (TCP) and 9002 (UDP)
 
 2. **local (172.20.0.3)** - Tunnel Client:
-   - Builds and runs ssh-socat-tunnel binary
+   - Builds and runs tut binary
    - Establishes SSH connection to remote
    - Creates port forwards:
      - TCP: remote:9001 → remote:127.0.0.1:8001

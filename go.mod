@@ -1,4 +1,4 @@
-module ssh-socat-tunnel
+module tut
 
 go 1.21
 

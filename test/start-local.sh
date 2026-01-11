@@ -35,4 +35,4 @@ sleep 2
 
 # Start the tunnel
 echo "Starting SSH tunnel..."
-exec /app/ssh-socat-tunnel -config /config/config.yaml
+exec /app/tut -config /config/config.yaml
